@@ -10,19 +10,17 @@ on:
 
 jobs:
   download:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     steps:
       - name: URLからBundle IDを抽出
         id: extract
         run: |
-          # URLから "id" に続く数字(App ID)を抽出
           APP_ID=$(echo "${{ inputs.app_url }}" | grep -o 'id[0-9]*' | cut -c 3-)
           if [ -z "$APP_ID" ]; then
             echo "エラー: 有効なApp Store URLではありません"
             exit 1
           fi
           
-          # iTunes APIを使用してBundle IDを取得
           BUNDLE_ID=$(curl -s "https://itunes.apple.com/lookup?id=$APP_ID" | jq -r '.results[0].bundleId')
           
           if [ "$BUNDLE_ID" == "null" ] || [ -z "$BUNDLE_ID" ]; then
@@ -36,21 +34,21 @@ jobs:
 
       - name: ipatoolのインストール
         run: |
-          brew tap majd/repo
-          brew install ipatool
+          curl -L https://github.com/majd/ipatool/releases/latest/download/ipatool-linux-amd64.tar.gz | tar xz
+          sudo mv bin/ipatool /usr/local/bin/
 
-      - name: Apple IDで認証
+      - name: 認証情報の復元 (2FA回避)
         env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-        run: ipatool auth login -e "$APPLE_ID" -p "$APPLE_PASSWORD"
+          IPATOOL_CONFIG: ${{ secrets.IPATOOL_CONFIG }}
+        run: |
+          mkdir -p ~/.config/ipatool
+          echo "$IPATOOL_CONFIG" > ~/.config/ipatool/config.json
 
       - name: IPAのダウンロード
         run: |
-          # 無料アプリで未購入の場合は --purchase フラグで取得
           ipatool download -b ${{ env.bundle_id }} --purchase -o app.ipa
 
-      - name: IPAファイルをArtifactにアップロード
+      - name: IPAファイルをArtifactに保存
         uses: actions/upload-artifact@v4
         with:
           name: Downloaded-IPA
