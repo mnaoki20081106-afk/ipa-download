@@ -12,12 +12,19 @@ jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: URLからBundle IDを抽出
+      - name: URLからBundle IDを確実に抽出
         id: extract
         run: |
-          APP_ID=$(echo "${{ inputs.app_url }}" | grep -o 'id[0-9]*' | cut -c 3-)
-          # ▼ 日本のApp Storeから検索するように /jp/ を追加 ▼
+          APP_ID=$(echo "${{ inputs.app_url }}" | grep -oE 'id[0-9]+' | sed 's/id//')
+          echo "App ID: $APP_ID"
+          
           BUNDLE_ID=$(curl -s "https://itunes.apple.com/jp/lookup?id=$APP_ID" | jq -r '.results[0].bundleId')
+          echo "Bundle ID: $BUNDLE_ID"
+          
+          if [ "$BUNDLE_ID" = "null" ] || [ -z "$BUNDLE_ID" ]; then
+            echo "エラー: URLからアプリ情報を取得できませんでした。URLを確認してください。"
+            exit 1
+          fi
           echo "bundle_id=$BUNDLE_ID" >> $GITHUB_ENV
 
       - name: ipatoolのインストール
@@ -36,14 +43,13 @@ jobs:
             echo "エラー: シークレットが空っぽです"
             exit 1
           fi
-          # 改行や空白のノイズを強制除去して解凍
           echo "${{ secrets.IPATOOL_KEYCHAIN }}" | tr -d '\n\r ' | base64 -d > auth_bundle.tar.gz
           tar -xzf auth_bundle.tar.gz
 
       - name: IPAのダウンロード
         run: |
-          # ▼ 「-c JP」を追記して、日本のApp Storeを指定 ▼
-          ipatool download -b ${{ env.bundle_id }} -c JP --purchase -o app.ipa --non-interactive --keychain-passphrase "123456"
+          # 存在しないフラグを削除し、取得したBundle IDで確実にダウンロード
+          ipatool download --bundle-identifier "${{ env.bundle_id }}" --purchase --output app.ipa --non-interactive --keychain-passphrase "123456"
 
       - name: IPAファイルを保存
         uses: actions/upload-artifact@v4
