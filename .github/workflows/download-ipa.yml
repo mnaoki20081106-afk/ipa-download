@@ -34,7 +34,20 @@ jobs:
 
       - name: ipatoolのインストール
         run: |
-          curl -L https://github.com/majd/ipatool/releases/latest/download/ipatool-linux-amd64.tar.gz | tar xz
+          # GitHub APIから最新リリースの情報を取得し、linux-amd64.tar.gz のURLを抽出する
+          ASSET_URL=$(curl -s https://api.github.com/repos/majd/ipatool/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-amd64.tar.gz")) | .browser_download_url')
+          
+          if [ -z "$ASSET_URL" ]; then
+            echo "エラー: ダウンロードURLが取得できませんでした"
+            exit 1
+          fi
+          
+          echo "ダウンロードURL: $ASSET_URL"
+          
+          # 抽出したURLからダウンロードして解凍
+          curl -L "$ASSET_URL" | tar xz
+          
+          # パスを通す
           sudo mv bin/ipatool /usr/local/bin/
 
       - name: 認証情報の復元 (2FA回避)
