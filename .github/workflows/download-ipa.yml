@@ -1,4 +1,4 @@
-name: Download iOS IPA
+name: Download iOS IPA to Release
 
 on:
   workflow_dispatch:
@@ -8,23 +8,19 @@ on:
         required: true
         type: string
 
+# Release作成のための権限を付与
+permissions:
+  contents: write
+
 jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: URLからBundle IDを確実に抽出
+      - name: URLからBundle IDを抽出
         id: extract
         run: |
           APP_ID=$(echo "${{ inputs.app_url }}" | grep -oE 'id[0-9]+' | sed 's/id//')
-          echo "App ID: $APP_ID"
-          
           BUNDLE_ID=$(curl -s "https://itunes.apple.com/jp/lookup?id=$APP_ID" | jq -r '.results[0].bundleId')
-          echo "Bundle ID: $BUNDLE_ID"
-          
-          if [ "$BUNDLE_ID" = "null" ] || [ -z "$BUNDLE_ID" ]; then
-            echo "エラー: URLからアプリ情報を取得できませんでした。URLを確認してください。"
-            exit 1
-          fi
           echo "bundle_id=$BUNDLE_ID" >> $GITHUB_ENV
 
       - name: ipatoolのインストール
@@ -36,24 +32,19 @@ jobs:
           sudo chmod +x /usr/local/bin/ipatool
           rm -rf ipatool_temp
 
-      - name: 認証データ（金庫）の安全な復元
+      - name: 認証データ（金庫）の復元
         run: |
           cd ~/
-          if [ -z "${{ secrets.IPATOOL_KEYCHAIN }}" ]; then
-            echo "エラー: シークレットが空っぽです"
-            exit 1
-          fi
           echo "${{ secrets.IPATOOL_KEYCHAIN }}" | tr -d '\n\r ' | base64 -d > auth_bundle.tar.gz
           tar -xzf auth_bundle.tar.gz
 
       - name: IPAのダウンロード
         run: |
-          # 存在しないフラグを削除し、取得したBundle IDで確実にダウンロード
           ipatool download --bundle-identifier "${{ env.bundle_id }}" --purchase --output app.ipa --non-interactive --keychain-passphrase "123456"
 
-      - name: IPAファイルを保存
-        uses: actions/upload-artifact@v4
+      - name: GitHub Releaseへアップロード
+        uses: softprops/action-gh-release@v2
         with:
-          name: Downloaded-IPA
-          path: app.ipa
-          retention-days: 1
+          tag_name: "ipa-${{ github.run_id }}"
+          name: "Downloaded IPA: ${{ env.bundle_id }}"
+          files: app.ipa
