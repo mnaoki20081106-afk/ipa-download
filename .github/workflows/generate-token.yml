@@ -1,0 +1,34 @@
+name: 1. Generate IPATool Token
+
+on:
+  workflow_dispatch:
+    inputs:
+      verification_code:
+        description: 'iPhoneの「設定 > サインインとセキュリティ」で表示した6桁の確認コード'
+        required: true
+        type: string
+
+jobs:
+  generate:
+    runs-on: macos-latest
+
+    steps:
+      - name: Install IPATool
+        run: brew install ipatool
+
+      - name: Generate and Show Base64 Token
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          CODE: ${{ github.event.inputs.verification_code }}
+        run: |
+          # パスワードの末尾に確認コードを結合してログインを試みる（Apple公式の2FAバイパス仕様）
+          ipatool auth login --non-interactive --email "$APPLE_ID" --password "${APPLE_PASSWORD}${CODE}"
+          
+          echo "========================================================="
+          echo "★以下の文字列（Base64トークン）をすべてコピーしてください："
+          echo "========================================================="
+          # 生成されたトークンをBase64に変換してログに出力
+          ipatool auth token | base64
+          echo "========================================================="
+          echo "コピーした文字列を、GitHubのSecretsに『IPATOOL_TOKEN』という名前で保存してください。"
