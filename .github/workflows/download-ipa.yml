@@ -34,9 +34,19 @@ jobs:
 
       - name: ipatoolのインストール
         run: |
+          # 最新版のURLを取得
           ASSET_URL=$(curl -s https://api.github.com/repos/majd/ipatool/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-amd64.tar.gz")) | .browser_download_url')
-          curl -L "$ASSET_URL" | tar xz
-          sudo mv bin/ipatool /usr/local/bin/
+          
+          # 一時フォルダを作成してその中に解凍
+          mkdir -p ipatool_temp
+          curl -L "$ASSET_URL" | tar xz -C ipatool_temp
+          
+          # フォルダ構造に関わらず "ipatool" 実行ファイルを探し出して配置
+          find ipatool_temp -type f -name "ipatool" -exec sudo mv {} /usr/local/bin/ipatool \;
+          sudo chmod +x /usr/local/bin/ipatool
+          
+          # 不要になった一時フォルダを削除
+          rm -rf ipatool_temp
 
       - name: 認証情報の復元 (2FA回避)
         env:
