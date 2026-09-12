@@ -1,50 +1,89 @@
-name: Download iOS IPA to Release
+name: Download IPA from App Store URL
 
 on:
   workflow_dispatch:
     inputs:
-      app_url:
-        description: 'App StoreのURL'
+      app_store_url:
+        description: "App Store のアプリURL (例: https://apps.apple.com/jp/app/xxxx/id123456789)"
         required: true
-        type: string
-
-# Release作成のための権限を付与
-permissions:
-  contents: write
+      purchase:
+        description: "無料アプリのライセンスが未取得の場合に自動取得する (--purchase)"
+        required: false
+        default: "true"
+        type: boolean
 
 jobs:
   download:
     runs-on: ubuntu-latest
     steps:
-      - name: URLからBundle IDを抽出
-        id: extract
+      - name: Resolve app numeric ID from App Store URL
+        id: parse_url
         run: |
-          APP_ID=$(echo "${{ inputs.app_url }}" | grep -oE 'id[0-9]+' | sed 's/id//')
-          BUNDLE_ID=$(curl -s "https://itunes.apple.com/jp/lookup?id=$APP_ID" | jq -r '.results[0].bundleId')
-          echo "bundle_id=$BUNDLE_ID" >> $GITHUB_ENV
+          URL="${{ inputs.app_store_url }}"
+          APP_ID=$(echo "$URL" | grep -oP 'id\K[0-9]+' | head -n1)
+          if [ -z "$APP_ID" ]; then
+            echo "::error::App Store URL から数値のアプリID (idXXXXXXXXX) を抽出できませんでした: $URL"
+            exit 1
+          fi
+          echo "app_id=$APP_ID" >> "$GITHUB_OUTPUT"
 
-      - name: ipatoolのインストール
+      - name: Look up bundle identifier via iTunes Lookup API
+        id: lookup
         run: |
-          ASSET_URL=$(curl -s https://api.github.com/repos/majd/ipatool/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-amd64.tar.gz")) | .browser_download_url')
-          mkdir -p ipatool_temp
-          curl -L "$ASSET_URL" | tar xz -C ipatool_temp
-          find ipatool_temp -type f -size +1M -exec sudo mv {} /usr/local/bin/ipatool \;
+          APP_ID="${{ steps.parse_url.outputs.app_id }}"
+          RESPONSE=$(curl -sSL "https://itunes.apple.com/lookup?id=${APP_ID}")
+          BUNDLE_ID=$(echo "$RESPONSE" | jq -r '.results[0].bundleId // empty')
+          APP_NAME=$(echo "$RESPONSE" | jq -r '.results[0].trackName // empty')
+          if [ -z "$BUNDLE_ID" ]; then
+            echo "::error::App ID ${APP_ID} からバンドルIDを取得できませんでした。国コードが違う、または非公開アプリの可能性があります。"
+            exit 1
+          fi
+          echo "bundle_id=$BUNDLE_ID" >> "$GITHUB_OUTPUT"
+          echo "app_name=$APP_NAME" >> "$GITHUB_OUTPUT"
+          echo "対象アプリ: $APP_NAME ($BUNDLE_ID)"
+
+      - name: Install ipatool
+        run: |
+          LATEST_TAG=$(curl -sSL https://api.github.com/repos/majd/ipatool/releases/latest | jq -r '.tag_name')
+          VERSION="${LATEST_TAG#v}"
+          curl -sSL -o ipatool.tar.gz \
+            "https://github.com/majd/ipatool/releases/download/${LATEST_TAG}/ipatool-${VERSION}-linux-amd64.tar.gz"
+          tar xzf ipatool.tar.gz
+          sudo mv ipatool /usr/local/bin/ipatool
           sudo chmod +x /usr/local/bin/ipatool
-          rm -rf ipatool_temp
+          ipatool --version
 
-      - name: 認証データ（金庫）の復元
+      - name: Restore ipatool session (事前に取得済みの認証セッション)
+        env:
+          IPATOOL_SESSION_B64: ${{ secrets.IPATOOL_SESSION_B64 }}
         run: |
-          cd ~/
-          echo "${{ secrets.IPATOOL_KEYCHAIN }}" | tr -d '\n\r ' | base64 -d > auth_bundle.tar.gz
-          tar -xzf auth_bundle.tar.gz
+          if [ -z "$IPATOOL_SESSION_B64" ]; then
+            echo "::error::Secret IPATOOL_SESSION_B64 が未設定です。README の手順に従って事前にセッションを作成・登録してください。"
+            exit 1
+          fi
+          echo "$IPATOOL_SESSION_B64" | base64 -d > ipatool-session.tar.gz
+          tar xzf ipatool-session.tar.gz -C "$HOME"
 
-      - name: IPAのダウンロード
+      - name: Download ipa
+        env:
+          IPATOOL_KEYCHAIN_PASSPHRASE: ${{ secrets.IPATOOL_KEYCHAIN_PASSPHRASE }}
         run: |
-          ipatool download --bundle-identifier "${{ env.bundle_id }}" --purchase --output app.ipa --non-interactive --keychain-passphrase "123456"
+          BUNDLE_ID="${{ steps.lookup.outputs.bundle_id }}"
+          PURCHASE_FLAG=""
+          if [ "${{ inputs.purchase }}" = "true" ]; then
+            PURCHASE_FLAG="--purchase"
+          fi
+          ipatool download \
+            -b "$BUNDLE_ID" \
+            -o app.ipa \
+            --keychain-passphrase "$IPATOOL_KEYCHAIN_PASSPHRASE" \
+            --non-interactive \
+            --format json \
+            $PURCHASE_FLAG
 
-      - name: GitHub Releaseへアップロード
-        uses: softprops/action-gh-release@v2
+      - name: Upload ipa as artifact
+        uses: actions/upload-artifact@v4
         with:
-          tag_name: "ipa-${{ github.run_id }}"
-          name: "Downloaded IPA: ${{ env.bundle_id }}"
-          files: app.ipa
+          name: ${{ steps.lookup.outputs.app_name }}-${{ steps.lookup.outputs.bundle_id }}
+          path: app.ipa
+          retention-days: 7
