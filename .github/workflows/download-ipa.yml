@@ -16,48 +16,31 @@ jobs:
         id: extract
         run: |
           APP_ID=$(echo "${{ inputs.app_url }}" | grep -o 'id[0-9]*' | cut -c 3-)
-          if [ -z "$APP_ID" ]; then
-            echo "エラー: 有効なApp Store URLではありません"
-            exit 1
-          fi
-          
           BUNDLE_ID=$(curl -s "https://itunes.apple.com/lookup?id=$APP_ID" | jq -r '.results[0].bundleId')
-          
-          if [ "$BUNDLE_ID" == "null" ] || [ -z "$BUNDLE_ID" ]; then
-            echo "エラー: Bundle IDの取得に失敗しました"
-            exit 1
-          fi
-          
           echo "bundle_id=$BUNDLE_ID" >> $GITHUB_ENV
-          echo "App ID: $APP_ID"
-          echo "Bundle ID: $BUNDLE_ID"
 
       - name: ipatoolのインストール
         run: |
-          # 最新版のURLを取得
           ASSET_URL=$(curl -s https://api.github.com/repos/majd/ipatool/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-amd64.tar.gz")) | .browser_download_url')
-          
-          # 一時フォルダを作成してその中に解凍
           mkdir -p ipatool_temp
           curl -L "$ASSET_URL" | tar xz -C ipatool_temp
-          
-          # フォルダ構造に関わらず "ipatool" 実行ファイルを探し出して配置
-          find ipatool_temp -type f -name "ipatool" -exec sudo mv {} /usr/local/bin/ipatool \;
+          find ipatool_temp -type f -size +1M -exec sudo mv {} /usr/local/bin/ipatool \;
           sudo chmod +x /usr/local/bin/ipatool
-          
-          # 不要になった一時フォルダを削除
           rm -rf ipatool_temp
 
-      - name: 認証情報の復元 (2FA回避)
+      - name: 認証データ（金庫）のまるごと復元
         env:
-          IPATOOL_CONFIG: ${{ secrets.IPATOOL_CONFIG }}
+          IPATOOL_KEYCHAIN: ${{ secrets.IPATOOL_KEYCHAIN }}
         run: |
-          mkdir -p ~/.config/ipatool
-          echo "$IPATOOL_CONFIG" > ~/.config/ipatool/config.json
+          cd ~/
+          # 丸ごと圧縮したデータを元通りに解凍
+          echo "$IPATOOL_KEYCHAIN" | base64 -d > auth_bundle.tar.gz
+          tar -xzf auth_bundle.tar.gz
 
       - name: IPAのダウンロード
         run: |
-          ipatool download -b ${{ env.bundle_id }} --purchase -o app.ipa
+          # 123456を自動入力してダウンロード
+          echo "123456" | ipatool download -b ${{ env.bundle_id }} --purchase -o app.ipa
 
       - name: IPAファイルを保存
         uses: actions/upload-artifact@v4
