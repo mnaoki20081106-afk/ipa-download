@@ -1,0 +1,24 @@
+name: Extract ipatool Token
+
+on: workflow_dispatch
+
+jobs:
+  extract-token:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 必要なツールのインストール
+        run: sudo apt-get update && sudo apt-get install -y jq curl
+
+      - name: ipatoolのインストール
+        run: |
+          ASSET_URL=$(curl -s https://api.github.com/repos/majd/ipatool/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-amd64.tar.gz")) | .browser_download_url')
+          
+          # 一時フォルダに解凍して、奥底にあるipatool実行ファイルを探し出す
+          mkdir -p ipatool_temp
+          curl -L "$ASSET_URL" | tar xz -C ipatool_temp
+          find ipatool_temp -type f -name "ipatool" -exec sudo mv {} /usr/local/bin/ipatool \;
+          sudo chmod +x /usr/local/bin/ipatool
+          rm -rf ipatool_temp
+
+      - name: ターミナル接続の開始 (tmate)
+        uses: mxschmitt/action-tmate@v3
