@@ -1,11 +1,15 @@
-name: Download IPA via App Store URL
+name: Download IPA via App Store URL (Mobile Friendly)
 
 on:
   workflow_dispatch:
     inputs:
       app_store_url:
-        description: 'App StoreのURLを入力してください (例: https://apple.com)'
+        description: 'App StoreのURL'
         required: true
+        type: string
+      two_factor_code:
+        description: '【2回目のみ入力】スマホに届いた2FAコード（6桁の数字）'
+        required: false
         type: string
 
 jobs:
@@ -16,12 +20,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # URLから「idXXXXX」の数字部分を抽出するステップ
+      # 1. URLから「idXXXXX」の数字部分を抽出
       - name: Extract App ID from URL
         id: extract_id
         run: |
           URL="${{ github.event.inputs.app_store_url }}"
-          # 正規表現で「id」の直後にある数字を抽出
           if [[ $URL =~ id([0-9]+) ]]; then
             APP_ID="${BASH_REMATCH[1]}"
             echo "Extracted App ID: $APP_ID"
@@ -31,19 +34,32 @@ jobs:
             exit 1
           fi
 
-      # 抽出したApp IDを使ってダウンロードを実行
-      # ※ submodules/ipatool-action の代わりに汎用コマンドで実行させています
-      - name: Download IPA using IPATool
+      # 2. IPAToolのインストールと認証・ダウンロード処理
+      - name: Run IPATool
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          2FA_CODE: ${{ github.event.inputs.two_factor_code }}
           APP_ID: ${{ steps.extract_id.outputs.app_id }}
         run: |
           brew install ipatool
-          # 非インタラクティブモードで認証して直接ダウンロード
-          ipatool download --non-interactive --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --app-id "$APP_ID"
 
-      # ダウンロードされたIPAファイルをArtifactsに保存
+          # 2FAコードの入力があるかどうかで処理を分岐
+          if [ -z "$2FA_CODE" ]; then
+            echo "=== 1回目の実行：2FAコードをスマホに通知します ==="
+            # 認証を試みて2FAコードを強制発火させる（非インタラクティブモードで認証エラーを起こす）
+            ipatool auth login --non-interactive --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" || true
+            echo "スマホに届いた6桁のコードを確認し、もう一度GitHub Actionsを『2FAコード付き』で実行してください。"
+          else
+            echo "=== 2回目の実行：2FAコードを使ってダウンロードを開始します ==="
+            # パスワードの末尾に2FAコードを結合してログインする（Apple公式の2FA強制突破仕様）
+            ipatool auth login --non-interactive --apple-id "$APPLE_ID" --password "${APPLE_PASSWORD}${2FA_CODE}"
+            
+            # ログイン成功後、アプリをダウンロード
+            ipatool download --app-id "$APP_ID"
+          fi
+
+      # 3. ダウンロードされたIPAファイルを保存
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
