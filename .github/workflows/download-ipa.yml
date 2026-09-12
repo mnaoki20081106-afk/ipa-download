@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       app_url:
-        description: 'App StoreのURL (例: https://apps.apple.com/jp/app/.../id123456789)'
+        description: 'App StoreのURL'
         required: true
         type: string
 
@@ -34,20 +34,8 @@ jobs:
 
       - name: ipatoolのインストール
         run: |
-          # GitHub APIから最新リリースの情報を取得し、linux-amd64.tar.gz のURLを抽出する
           ASSET_URL=$(curl -s https://api.github.com/repos/majd/ipatool/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-amd64.tar.gz")) | .browser_download_url')
-          
-          if [ -z "$ASSET_URL" ]; then
-            echo "エラー: ダウンロードURLが取得できませんでした"
-            exit 1
-          fi
-          
-          echo "ダウンロードURL: $ASSET_URL"
-          
-          # 抽出したURLからダウンロードして解凍
           curl -L "$ASSET_URL" | tar xz
-          
-          # パスを通す
           sudo mv bin/ipatool /usr/local/bin/
 
       - name: 認証情報の復元 (2FA回避)
@@ -61,7 +49,7 @@ jobs:
         run: |
           ipatool download -b ${{ env.bundle_id }} --purchase -o app.ipa
 
-      - name: IPAファイルをArtifactに保存
+      - name: IPAファイルを保存
         uses: actions/upload-artifact@v4
         with:
           name: Downloaded-IPA
