@@ -4,20 +4,17 @@ on: workflow_dispatch
 
 jobs:
   extract-token:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04 # ←ここを 22.04 に変更しました
     steps:
       - name: 必要なツールのインストール
         run: sudo apt-get update && sudo apt-get install -y jq curl
 
       - name: ipatoolのインストール
         run: |
-          # 最新版のURLを取得
           ASSET_URL=$(curl -s https://api.github.com/repos/majd/ipatool/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-amd64.tar.gz")) | .browser_download_url')
           
           mkdir -p ipatool_temp
           curl -L "$ASSET_URL" | tar xz -C ipatool_temp
-          
-          # ファイル名が変わっていても、1MB以上のファイル（＝実行ファイル本体）を探し出して配置する
           find ipatool_temp -type f -size +1M -exec sudo mv {} /usr/local/bin/ipatool \;
           sudo chmod +x /usr/local/bin/ipatool
           rm -rf ipatool_temp
