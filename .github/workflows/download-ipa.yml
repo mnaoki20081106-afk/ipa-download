@@ -1,51 +1,58 @@
-name: 2. Download IPA via App Store URL
+name: Download iOS IPA
 
 on:
   workflow_dispatch:
     inputs:
-      app_store_url:
-        description: 'App StoreのURL'
+      app_url:
+        description: 'App StoreのURL (例: https://apps.apple.com/jp/app/.../id123456789)'
         required: true
         type: string
 
 jobs:
   download:
     runs-on: macos-latest
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # URLから「idXXXXX」の数字部分を抽出
-      - name: Extract App ID from URL
-        id: extract_id
+      - name: URLからBundle IDを抽出
+        id: extract
         run: |
-          URL="${{ github.event.inputs.app_store_url }}"
-          if [[ $URL =~ id([0-9]+) ]]; then
-            APP_ID="${BASH_REMATCH}"
-            echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
-          else
-            echo "Error: URLからApp IDを検出できませんでした。"
+          # URLから "id" に続く数字(App ID)を抽出
+          APP_ID=$(echo "${{ inputs.app_url }}" | grep -o 'id[0-9]*' | cut -c 3-)
+          if [ -z "$APP_ID" ]; then
+            echo "エラー: 有効なApp Store URLではありません"
             exit 1
           fi
+          
+          # iTunes APIを使用してBundle IDを取得
+          BUNDLE_ID=$(curl -s "https://itunes.apple.com/lookup?id=$APP_ID" | jq -r '.results[0].bundleId')
+          
+          if [ "$BUNDLE_ID" == "null" ] || [ -z "$BUNDLE_ID" ]; then
+            echo "エラー: Bundle IDの取得に失敗しました"
+            exit 1
+          fi
+          
+          echo "bundle_id=$BUNDLE_ID" >> $GITHUB_ENV
+          echo "App ID: $APP_ID"
+          echo "Bundle ID: $BUNDLE_ID"
 
-      # Base64トークンをデコードしてダウンロードを実行
-      - name: Download IPA using Token
-        env:
-          BASE64_TOKEN: ${{ secrets.IPATOOL_TOKEN }}
-          APP_ID: ${{ steps.extract_id.outputs.app_id }}
+      - name: ipatoolのインストール
         run: |
+          brew tap majd/repo
           brew install ipatool
-          
-          # SecretsのBase64をデコードして環境変数にセット
-          export IPATOOL_TOKEN=$(echo "$BASE64_TOKEN" | base64 --decode)
-          
-          # トークンがあるのでログイン処理を飛ばして直接ダウンロード可能
-          ipatool download --app-id "$APP_ID"
 
-      # IPAファイルを保存
-      - name: Upload IPA Artifact
+      - name: Apple IDで認証
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+        run: ipatool auth login -e "$APPLE_ID" -p "$APPLE_PASSWORD"
+
+      - name: IPAのダウンロード
+        run: |
+          # 無料アプリで未購入の場合は --purchase フラグで取得
+          ipatool download -b ${{ env.bundle_id }} --purchase -o app.ipa
+
+      - name: IPAファイルをArtifactにアップロード
         uses: actions/upload-artifact@v4
         with:
-          name: downloaded-app-ipa
-          path: '*.ipa'
+          name: Downloaded-IPA
+          path: app.ipa
+          retention-days: 1
