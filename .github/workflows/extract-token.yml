@@ -11,12 +11,14 @@ jobs:
 
       - name: ipatoolのインストール
         run: |
+          # 最新版のURLを取得
           ASSET_URL=$(curl -s https://api.github.com/repos/majd/ipatool/releases/latest | jq -r '.assets[] | select(.name | endswith("linux-amd64.tar.gz")) | .browser_download_url')
           
-          # 一時フォルダに解凍して、奥底にあるipatool実行ファイルを探し出す
           mkdir -p ipatool_temp
           curl -L "$ASSET_URL" | tar xz -C ipatool_temp
-          find ipatool_temp -type f -name "ipatool" -exec sudo mv {} /usr/local/bin/ipatool \;
+          
+          # ファイル名が変わっていても、1MB以上のファイル（＝実行ファイル本体）を探し出して配置する
+          find ipatool_temp -type f -size +1M -exec sudo mv {} /usr/local/bin/ipatool \;
           sudo chmod +x /usr/local/bin/ipatool
           rm -rf ipatool_temp
 
