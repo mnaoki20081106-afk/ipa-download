@@ -29,17 +29,15 @@ jobs:
           rm -rf ipatool_temp
 
       - name: 認証データ（金庫）のまるごと復元
-        env:
-          IPATOOL_KEYCHAIN: ${{ secrets.IPATOOL_KEYCHAIN }}
         run: |
           cd ~/
-          # 丸ごと圧縮したデータを元通りに解凍
-          echo "$IPATOOL_KEYCHAIN" | base64 -d > auth_bundle.tar.gz
+          # 長い文字列が途切れないように一度ファイルに書き出し、不要な改行を無視(-i)して復元する
+          echo "${{ secrets.IPATOOL_KEYCHAIN }}" > auth_bundle.b64
+          base64 -d -i auth_bundle.b64 > auth_bundle.tar.gz
           tar -xzf auth_bundle.tar.gz
 
       - name: IPAのダウンロード
         run: |
-          # 123456を自動入力してダウンロード
           echo "123456" | ipatool download -b ${{ env.bundle_id }} --purchase -o app.ipa
 
       - name: IPAファイルを保存
